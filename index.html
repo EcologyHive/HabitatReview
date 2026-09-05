@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Habitat Review &mdash; EcologyHive</title>
+<title>Habitat Linker &mdash; EcologyHive</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
@@ -332,7 +332,7 @@ function render(){
   const app=document.getElementById('app');
   const user=fbAuth&&fbAuth.currentUser;
   if(!user){ renderSignIn(app); return; }
-  let h=`<div class="topbar"><h1>Habitat Review</h1>
+  let h=`<div class="topbar"><h1>Habitat Linker</h1>
     <div class="who">${esc(user.email)} &middot; <a href="#" id="signout">Sign out</a></div></div>`;
   if(nav.v==='visits') h+=visitsHTML();
   else if(nav.v==='visit') h+=visitHTML(nav.id);
@@ -343,7 +343,7 @@ function render(){
 }
 function renderSignIn(app){
   app.innerHTML=`<div class="center">
-    <h2>Habitat Review</h2>
+    <h2>Habitat Linker</h2>
     <p class="mut">Sign in with the same EcologyHive account used on the field app.</p>
     <label>Email<input type="email" id="si_email"></label>
     <label>Password<input type="password" id="si_pass"></label>
