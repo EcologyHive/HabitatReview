@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Habitat Review &mdash; EcologyHive</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" crossorigin="anonymous"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js" crossorigin="anonymous"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-database-compat.js" crossorigin="anonymous"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js" crossorigin="anonymous"></script>
+<style>
+:root{
+  --teal:#0F5C5C; --teal2:#176F6E; --teal-lite:#e3efee;
+  --paper:#F3F6F4; --paper2:#efeadf; --amber:#F68A15;
+  --ink:#1f2422; --ink2:#5c635f; --ink3:#8b918d;
+  --line:#ddd8cc; --white:#fff;
+  --ok:#2f7d4f; --warn:#b8860b; --bad:#a8412c;
+  --r:10px; --sp:14px;
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:'Inter',system-ui,sans-serif;background:var(--paper);color:var(--ink);font-size:14px}
+h1,h2,h3{font-family:'Montserrat',sans-serif;margin:0}
+button{font-family:inherit;cursor:pointer}
+a{color:var(--teal)}
+.topbar{background:var(--white);border-bottom:1px solid var(--line);padding:12px 20px;display:flex;align-items:center;justify-content:space-between}
+.topbar h1{font-size:17px;color:var(--teal)}
+.topbar .who{font-size:12px;color:var(--ink2)}
+.btn{background:var(--teal);color:#fff;border:none;border-radius:8px;padding:9px 16px;font-size:13px;font-weight:700}
+.btn.ghost{background:none;border:1.4px solid var(--teal2);color:var(--teal2)}
+.btn.danger{background:none;border:1.4px solid var(--bad);color:var(--bad)}
+.btn.sm{padding:6px 11px;font-size:12px}
+.btn:disabled{opacity:.45;cursor:default}
+input,select,textarea{font-family:inherit;font-size:13px;padding:8px 10px;border:1px solid var(--line);border-radius:7px;background:#fff;color:var(--ink)}
+.wrap{max-width:1400px;margin:0 auto;padding:20px}
+.center{max-width:380px;margin:80px auto;padding:28px;background:#fff;border-radius:12px;border:1px solid var(--line)}
+.center h2{margin-bottom:14px}
+.center label{display:block;margin-bottom:10px;font-size:12px;font-weight:700;color:var(--ink2)}
+.center input{width:100%;margin-top:4px}
+.err{color:var(--bad);font-size:12.5px;margin:8px 0}
+.mut{color:var(--ink2);font-size:12.5px}
+.card{background:#fff;border:1px solid var(--line);border-radius:var(--r);padding:14px}
+.grid3{display:grid;grid-template-columns:320px 1fr 340px;gap:14px;align-items:start}
+.sect{font-size:11px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;color:var(--ink3);margin:16px 0 8px}
+.sect:first-child{margin-top:0}
+.list-item{padding:10px 12px;border-radius:8px;border:1px solid var(--line);margin-bottom:8px;cursor:pointer;background:#fff}
+.list-item:hover{border-color:var(--teal2)}
+.list-item.on{border-color:var(--teal);background:var(--teal-lite)}
+.list-item h3{font-size:13.5px}
+.list-item .meta{font-size:11.5px;color:var(--ink2);margin-top:3px}
+.pill{display:inline-block;padding:2px 7px;border-radius:20px;font-size:10.5px;font-weight:800;margin-right:4px}
+.pill.ok{background:#e2f2e8;color:var(--ok)}
+.pill.warn{background:#fbf1d8;color:var(--warn)}
+.pill.bad{background:#f8e5e0;color:var(--bad)}
+.pill.grey{background:var(--paper2);color:var(--ink2)}
+#map{height:560px;border-radius:var(--r);border:1px solid var(--line)}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.feat-row{display:flex;justify-content:space-between;align-items:center;padding:6px 8px;border-radius:6px;font-size:12.5px}
+.feat-row:hover{background:var(--paper2)}
+.feat-row.linked{background:var(--teal-lite)}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
+th{color:var(--ink2);font-weight:700;font-size:11px;text-transform:uppercase}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:24px;z-index:999;background:var(--ink);color:#fff;padding:10px 18px;border-radius:22px;font-size:13px;font-weight:700;opacity:0;transition:opacity .2s;pointer-events:none}
+.toast.on{opacity:1}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div class="toast" id="toast"></div>
+<script>
+/* ============================================================
+   Firebase - reads the same habitats/<org>/db blob BotanicApp
+   writes (read-only from here), and keeps this app's own working
+   state (uploaded features, parcel<->feature links) in a sibling
+   path, habitats/<org>/review, so the two apps never write the
+   same keys and can't clobber each other. Same project/org as
+   BotanicApp - one shared sign-in, not a second account system.
+   ============================================================ */
+const HSYNC_ORG='aerial-ecology';
+const HSYNC_CONFIG={
+  apiKey:'AIzaSyA3KtbST1u6xfReD5Jqmlb7dxVRQENuh1s',
+  authDomain:'ae-batassist.firebaseapp.com',
+  databaseURL:'https://ae-batassist-default-rtdb.europe-west1.firebasedatabase.app',
+  projectId:'ae-batassist',
+  storageBucket:'ae-batassist.firebasestorage.app',
+  messagingSenderId:'1022233688076',
+  appId:'1:1022233688076:web:4e2a95562f9aa4b8a91629',
+};
+let fbAuth=null, fbDb=null;
+function fbEnsure(){
+  if(!window.firebase) throw new Error('Sync scripts failed to load - check your connection and reload.');
+  if(!firebase.apps || !firebase.apps.length) firebase.initializeApp(HSYNC_CONFIG);
+  if(!fbAuth) fbAuth=firebase.auth();
+  if(!fbDb) fbDb=firebase.database();
+}
+async function fbSignIn(email,password){
+  fbEnsure();
+  const cred=await fbAuth.signInWithEmailAndPassword(email.trim(),password);
+  const memberSnap=await fbDb.ref('sync/orgMembers/'+HSYNC_ORG+'/'+cred.user.uid).once('value');
+  if(!memberSnap.val()){ await fbAuth.signOut(); throw new Error('That sign-in worked, but this account is not a member of the org this data belongs to.'); }
+  return cred.user;
+}
+function dbRoot(){ return 'habitats/'+HSYNC_ORG; }
+function reviewRoot(){ return 'habitats/'+HSYNC_ORG+'/review'; }
+
+/* ============================================================
+   State
+   ============================================================ */
+let SURVEY={visits:[],parcels:[],quadrats:[],targets:[]};  // read-only mirror of BotanicApp's data
+let REVIEW={visits:{}};  // this app's own data: { [visitId]: { features:[], links:{parcelId:[featureId,...]} } }
+let surveyUnsub=null, reviewUnsub=null;
+let nav={v:'visits'};
+let armedParcelId=null; // when set, clicking an uploaded feature toggles its link to this parcel
+
+const uid=p=>p+Math.random().toString(36).slice(2,9);
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function toast(m){ const t=document.getElementById('toast'); t.textContent=m; t.classList.add('on'); setTimeout(()=>t.classList.remove('on'),2200); }
+function go(v,extra){ nav=Object.assign({v},extra); render(); }
+const visit=id=>SURVEY.visits.find(v=>v.id===id);
+const parcelsOf=vid=>SURVEY.parcels.filter(p=>p.visitId===vid);
+function visitReview(vid){ REVIEW.visits[vid]=REVIEW.visits[vid]||{features:[],links:{}}; return REVIEW.visits[vid]; }
+
+function subscribeSurvey(){
+  if(surveyUnsub) return;
+  fbEnsure();
+  const ref=fbDb.ref(dbRoot()+'/db');
+  const handler=ref.on('value',snap=>{
+    const val=snap.val();
+    if(!val) return;
+    SURVEY=Object.assign({visits:[],parcels:[],quadrats:[],targets:[]},val);
+    render();
+  });
+  surveyUnsub=()=>ref.off('value',handler);
+}
+function subscribeReview(){
+  if(reviewUnsub) return;
+  fbEnsure();
+  const ref=fbDb.ref(reviewRoot());
+  const handler=ref.on('value',snap=>{
+    REVIEW={visits:snap.val()&&snap.val().visits||{}};
+    render();
+  });
+  reviewUnsub=()=>ref.off('value',handler);
+}
+let reviewPushTimer=null;
+function saveReview(){
+  clearTimeout(reviewPushTimer);
+  reviewPushTimer=setTimeout(()=>{
+    fbEnsure();
+    fbDb.ref(reviewRoot()).set(REVIEW).catch(e=>console.error('review save failed',e));
+  },500);
+}
+
+/* ============================================================
+   condScore - ported verbatim from BotanicApp (self-contained:
+   only reads p.condition/p.metrics, no dependency on the full
+   COND_TEMPLATES data, so no need to duplicate that here).
+   ============================================================ */
+function condScore(p){
+  const t=p.condition; if(!t) return null;
+  const mode=t.scoreMode||'count';
+  if(mode!=='lake' && (!t.crit||!t.crit.length)) return null;
+  if(mode==='points'){
+    const scored=t.crit.filter(c=>c.r==='g'||c.r==='m'||c.r==='po');
+    if(!scored.length) return null;
+    const pts=scored.reduce((s,c)=>s+(c.r==='g'?3:c.r==='m'?2:1),0);
+    const done=t.crit.every(c=>c.r==='g'||c.r==='m'||c.r==='po');
+    let band='Poor';
+    if(pts>t.mod-1 && pts>=t.good) band='Good';
+    else if(pts>=t.mod) band='Moderate';
+    return {pass:pts,total:t.pointsMax||scored.length*3,band,done,points:true};
+  }
+  if(mode==='grass_med'){
+    const acid=!!t.acid;
+    const inScope=c=>acid ? !c.acidExclude : true;
+    const crit=t.crit.filter(inScope);
+    const app=crit.filter(c=>c.r!=='na');
+    const pass=crit.filter(c=>c.r==='p').length;
+    if(!app.length) return null;
+    const done=crit.every(c=>c.r);
+    const A=t.crit.find(c=>c.mNonAcidOnly), F=t.crit.find(c=>c.mGoodOnly);
+    const aPass=A&&A.r==='p', fPass=F&&F.r==='p';
+    let band='Poor';
+    if(acid){ if(pass>=5) band='Good'; else if(pass>=3) band='Moderate'; }
+    else { if(pass>=5 && aPass && fPass) band='Good'; else if(pass>=3 && aPass) band='Moderate'; }
+    return {pass,total:app.length,band,done};
+  }
+  if(mode==='wetland'){
+    const core=t.crit.filter(c=>!c.opt);
+    const adds=t.crit.filter(c=>c.opt && c.r && c.r!=='na');
+    const scope=core.concat(adds);
+    const app=scope.filter(c=>c.r!=='na');
+    const pass=scope.filter(c=>c.r==='p').length;
+    if(!app.length) return null;
+    const A=t.crit.find(c=>c.m), aPass=A&&A.r==='p';
+    const hasAdd=adds.length>0;
+    const done=core.every(c=>c.r) && (hasAdd? adds.every(c=>c.r):true);
+    let band='Poor';
+    if(hasAdd){
+      const addPass=adds.some(c=>c.r==='p');
+      const corePass=core.filter(c=>c.r==='p').length;
+      if(corePass>=5 && aPass && addPass) band='Good'; else if(pass>=4) band='Moderate';
+    } else {
+      const corePass=core.filter(c=>c.r==='p').length;
+      if(corePass>=5 && aPass) band='Good'; else if(corePass>=3) band='Moderate';
+    }
+    return {pass,total:app.length,band,done};
+  }
+  if(mode==='hedgerow'){
+    const trees=!!t.trees;
+    const scope=t.crit.filter(c=>trees||!c.treesOnly);
+    const scored=scope.filter(c=>c.r==='p'||c.r==='f');
+    if(!scored.length) return null;
+    const done=scope.every(c=>c.r==='p'||c.r==='f');
+    const totalFail=scored.filter(c=>c.r==='f').length;
+    const groups={};
+    scored.forEach(c=>{ (groups[c.grp]=groups[c.grp]||[]).push(c.r); });
+    const groupFails=Object.values(groups).map(rs=>rs.filter(r=>r==='f').length);
+    const maxGroupFail=groupFails.length?Math.max(...groupFails):0;
+    const groupsFullyFailed=groupFails.filter(f=>f>=2).length;
+    const modLimit=trees?5:4;
+    let band='Poor';
+    if(totalFail<=2 && maxGroupFail<=1) band='Good';
+    else if(totalFail<=modLimit && groupsFullyFailed<=1) band='Moderate';
+    return {pass:scored.length-totalFail,total:scope.length,band,done};
+  }
+  if(mode==='pond'){
+    const woodland=!!t.woodland;
+    const scope=t.crit.filter(c=>!(woodland&&c.woodlandExclude));
+    const scored=scope.filter(c=>c.r==='p'||c.r==='f');
+    if(!scored.length) return null;
+    const done=scope.every(c=>c.r==='p'||c.r==='f');
+    const pass=scored.filter(c=>c.r==='p').length;
+    const total=scope.length;
+    let band='Poor';
+    if(woodland){ if(pass>=7) band='Good'; else if(pass>=5) band='Moderate'; }
+    else { if(pass>=9) band='Good'; else if(pass>=6) band='Moderate'; }
+    return {pass,total,band,done};
+  }
+  if(mode==='urban'){
+    const type=t.urbanType||'';
+    const scope=t.crit.filter(c=>!c.only||c.only.includes(type));
+    const scored=scope.filter(c=>c.r);
+    if(!scored.length) return null;
+    const done=scope.every(c=>c.r);
+    const pass=scope.filter(c=>c.r==='p'||c.r==='g').length;
+    const total=scope.length;
+    const cCrit=scope.find(c=>c.triC);
+    const cGood=!cCrit||cCrit.r==='g';
+    const allPass=pass===total;
+    let band='Poor';
+    if(total===5){ if(allPass&&cGood) band='Good'; else if(pass>=3) band='Moderate'; }
+    else { if(allPass&&cGood) band='Good'; else if(pass>=2) band='Moderate'; }
+    return {pass,total,band,done};
+  }
+  if(mode==='lake'){
+    const cls=t.lakeClass;
+    if(!cls) return null;
+    const map={1:{band:'Good',score:3},2:{band:'Fairly good',score:2.5},3:{band:'Moderate',score:2},
+      4:{band:'Fairly poor',score:1.5},5:{band:'Poor',score:1}};
+    const m=map[cls];
+    return {pass:null,total:null,band:m.band,done:true,lakeScore:m.score,lakeClass:cls};
+  }
+  const app=t.crit.filter(c=>c.r!=='na');
+  const pass=t.crit.filter(c=>c.r==='p').length;
+  if(!app.length) return null;
+  const done=t.crit.filter(c=>c.r).length===t.crit.length;
+  const essentials=t.crit.filter(c=>c.m);
+  const essFail=essentials.some(c=>c.r==='f');
+  let band='Poor';
+  if(pass>=t.good) band='Good'; else if(pass>=t.mod) band='Moderate';
+  if(essFail && band==='Good') band='Moderate';
+  if(t.tpl==='grass_low' && essFail) band='Poor';
+  return {pass,total:app.length,band,done};
+}
+/* Good/Moderate/Poor (3-band, most condition sheets) or Good/Fairly good/Moderate/Fairly
+   poor/Poor (5-band, Lake only) -> the Statutory Metric's own 5-band condition label. */
+const CONDITION_LABEL={'Good':'1. Good','Fairly good':'2. Fairly Good','Moderate':'3. Moderate',
+  'Fairly poor':'4. Fairly Poor','Poor':'5. Poor'};
+
+/* ============================================================
+   Distinctiveness lookups - transcribed from the Statutory
+   Biodiversity Metric QGIS template's own CSV references
+   (Habitat/Hedgerow/Watercourse/Individual tree Distinctiveness-
+   pre.csv). Keyed by the exact habitat/type name string used in
+   the metric - if a parcel's UKHab name doesn't match exactly,
+   Distinctiveness is left blank for the analyst to fill in,
+   rather than guessed.
+   ============================================================ */
+const DIST_HABITAT={"Arable field margins cultivated annually":"Medium","Arable field margins game bird mix":"Medium","Arable field margins pollen and nectar":"Medium","Arable field margins tussocky":"Medium","Cereal crops":"Low","Cereal crops other":"Low","Winter stubble":"Low","Horticulture":"Low","Intensive orchards":"Low","Non-cereal crops":"Low","Temporary grass and clover leys":"Low","Traditional orchards":"High","Bracken":"Low","Floodplain wetland mosaic and CFGM":"High","Lowland calcareous grassland":"High","Lowland dry acid grassland":"V.High","Lowland meadows":"V.High","Modified grassland":"Low","Other lowland acid grassland":"Medium","Other neutral grassland":"Medium","Tall herb communities (H6430)":"High","Upland acid grassland":"Medium","Upland calcareous grassland":"High","Upland hay meadows":"V.High","Blackthorn scrub":"Medium","Bramble scrub":"Medium","Gorse scrub":"Medium","Hawthorn scrub":"Medium","Hazel scrub":"Medium","Lowland heathland":"High","Mixed scrub":"Medium","Mountain heaths and willow scrub":"V.High","Rhododendron scrub":"Low","Dunes with sea buckthorn (H2160)":"High","Other sea buckthorn scrub":"Low","Upland heathland":"High","Willow scrub":"Medium","Aquifer fed naturally fluctuating water bodies":"V.High","Ornamental lake or pond":"Low","High alkalinity lakes":"High","Low alkalinity lakes":"High","Marl lakes":"High","Moderate alkalinity lakes":"High","Peat lakes":"High","Ponds (priority habitat)":"High","Ponds (non-priority habitat)":"Medium","Reservoirs":"Medium","Temporary lakes ponds and pools (H3170)":"High","Calaminarian grasslands":"V.High","Coastal sand dunes":"High","Coastal vegetated shingle":"High","Ruderal/Ephemeral":"Low","Tall forbs":"Low","Inland rock outcrop and scree habitats":"High","Limestone pavement":"V.High","Maritime cliff and slopes":"High","Other inland rock and scree":"Medium","Allotments":"Low","Artificial unvegetated, unsealed surface":"V.Low","Bioswale":"Low","Biodiverse green roof":"Medium","Built linear features":"V.Low","Cemeteries and churchyards":"Medium","Developed land; sealed surface":"V.Low","Other green roof":"Low","Ground level planters":"Low","Intensive green roof":"Low","Introduced shrub":"Low","Open mosaic habitats on previously developed land":"High","Rain garden":"Low","Actively worked sand pit quarry or open cast mine":"Low","Sustainable drainage system":"Low","Unvegetated garden":"V.Low","Vacant or derelict land":"Low","Bare ground":"Low","Vegetated garden":"Low","Blanket bog":"V.High","Depressions on peat substrates (H7150)":"V.High","Fens (upland and lowland)":"V.High","Lowland raised bog":"V.High","Oceanic valley mire[1] (D2.1)":"V.High","Purple moor grass and rush pastures":"V.High","Reedbeds":"High","Transition mires and quaking bogs (H7140)":"V.High","Felled":"High","Lowland beech and yew woodland":"High","Lowland mixed deciduous woodland":"High","Native pine woodlands":"High","Other coniferous woodland":"Low","Other Scot's pine woodland":"Medium","Other woodland; broadleaved":"Medium","Other woodland; mixed":"Medium","Upland birchwoods":"High","Upland mixed ashwoods":"High","Upland oakwood":"High","Wet woodland":"High","Wood-pasture and parkland":"High","Coastal lagoons":"High","High energy littoral rock":"High","High energy littoral rock - on peat, clay or chalk":"V.High","Moderate energy littoral rock":"High","Moderate energy littoral rock - on peat, clay or chalk":"V.High","Low energy littoral rock":"High","Low energy littoral rock - on peat, clay or chalk":"V.High","Features of littoral rock":"High","Features of littoral rock - on peat, clay or chalk":"V.High","Saltmarshes and saline reedbeds":"Medium","Artificial saltmarshes and saline reedbeds":"High","Littoral coarse sediment":"High","Littoral mud":"High","Littoral mixed sediments":"Low","Littoral seagrass":"High","Littoral seagrass on peat, clay or chalk":"V.High","Littoral biogenic reefs - Mussels":"High","Littoral biogenic reefs - Sabellaria":"High","Features of littoral sediment":"High","Artificial littoral coarse sediment":"Low","Artificial littoral mud":"Low","Artificial littoral sand":"Low","Artificial littoral muddy sand":"Low","Artificial littoral mixed sediments":"Low","Artificial littoral seagrass":"Low","Artificial littoral biogenic reefs":"Low","Littoral sand":"Medium","Littoral muddy sand":"High","Artificial hard structures":"Low","Artificial features of hard structures":"Low","Artificial hard structures with integrated greening of grey infrastructure (IGGI)":"Medium","Watercourse footprint":"V.Low"};
+const DIST_HEDGE={"Species-rich native hedgerow with trees - associated with bank or ditch":"V.High","Species-rich native hedgerow - associated with bank or ditch":"High","Species-rich native hedgerow with trees":"High","Species-rich native hedgerow":"Medium","Native hedgerow with trees - associated with bank or ditch":"Medium","Native hedgerow - associated with bank or ditch":"Medium","Native hedgerow with trees":"Medium","Native hedgerow":"Medium","Ecologically valuable line of trees - associated with bank or ditch":"Medium","Ecologically valuable line of trees":"Medium","Line of trees - associated with bank or ditch":"Low","Line of trees":"Low","Non-native and ornamental hedgerow":"Low"};
+const DIST_RIVER={"Priority habitat":"V.High","Other rivers and streams":"Moderate","Ditches":"Low","Canals":"Low"};
+const DIST_TREE={"Urban tree":"Medium","Rural tree":"Medium"};
+
+/* Which layer type a recorded parcel belongs to, for export grouping - mirrors BotanicApp's
+   own bngLinearCategory()/spatial-type logic (not duplicating its full source, just the
+   classification a parcel's own stored fields already make possible). */
+function layerTypeOf(p){
+  if(p.spatial==='point') return 'trees';
+  const code=(p.ukhab||'').toLowerCase(), sec=p.sec||[];
+  if(code==='h2a'||code==='h2b'||sec.includes('33')||sec.includes('34')) return 'hedgerows';
+  if(code==='r1e'||code==='r2a'||code==='r2b'||sec.includes('50')) return 'rivers';
+  return 'habitats';
+}
+const LAYER_LABEL={habitats:'Habitats',hedgerows:'Hedgerows',rivers:'Rivers',trees:'Individual Trees'};
+
+/* ============================================================
+   QA - what a parcel needs before it can export cleanly.
+   ============================================================ */
+function parcelQA(p,vid){
+  const issues=[];
+  if(!p.ukhab) issues.push('No habitat code recorded');
+  const s=condScore(p);
+  if(!s) issues.push('No condition assessed');
+  else if(!s.done) issues.push('Condition assessment incomplete');
+  const links=(visitReview(vid).links[p.id]||[]);
+  if(!links.length) issues.push('No linked geometry');
+  const lt=layerTypeOf(p);
+  if(lt==='habitats' && p.spatial==='area' && (p.area==null||p.area==='')) issues.push('No area recorded');
+  if((lt==='hedgerows'||lt==='rivers') && (p.area==null||p.area==='')) issues.push('No length recorded');
+  return issues;
+}
+
+/* ============================================================
+   Rendering
+   ============================================================ */
+function render(){
+  const app=document.getElementById('app');
+  const user=fbAuth&&fbAuth.currentUser;
+  if(!user){ renderSignIn(app); return; }
+  let h=`<div class="topbar"><h1>Habitat Review</h1>
+    <div class="who">${esc(user.email)} &middot; <a href="#" id="signout">Sign out</a></div></div>`;
+  if(nav.v==='visits') h+=visitsHTML();
+  else if(nav.v==='visit') h+=visitHTML(nav.id);
+  app.innerHTML=h;
+  document.getElementById('signout').onclick=e=>{ e.preventDefault(); fbAuth.signOut(); };
+  if(nav.v==='visits') wireVisits();
+  else if(nav.v==='visit') wireVisit(nav.id);
+}
+function renderSignIn(app){
+  app.innerHTML=`<div class="center">
+    <h2>Habitat Review</h2>
+    <p class="mut">Sign in with the same EcologyHive account used on the field app.</p>
+    <label>Email<input type="email" id="si_email"></label>
+    <label>Password<input type="password" id="si_pass"></label>
+    <div class="err" id="si_err"></div>
+    <button class="btn" id="si_go" style="width:100%">Sign in</button>
+  </div>`;
+  const go=async()=>{
+    const email=document.getElementById('si_email').value, pass=document.getElementById('si_pass').value;
+    const errEl=document.getElementById('si_err'); errEl.textContent='';
+    try{ await fbSignIn(email,pass); subscribeSurvey(); subscribeReview(); }
+    catch(e){ errEl.textContent=e.message; }
+  };
+  document.getElementById('si_go').onclick=go;
+  document.getElementById('si_pass').onkeydown=e=>{ if(e.key==='Enter') go(); };
+}
+function visitsHTML(){
+  const vs=[...SURVEY.visits].sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  let h='<div class="wrap"><div class="sect">Site visits</div>';
+  if(!vs.length) h+='<p class="mut">No survey data yet - visits recorded in the Habitats field app will appear here once synced.</p>';
+  h+=vs.map(v=>{
+    const ps=parcelsOf(v.id);
+    const rev=visitReview(v.id);
+    const linked=ps.filter(p=>(rev.links[p.id]||[]).length).length;
+    return `<div class="list-item" data-visit="${v.id}"><h3>${esc(v.project||'Untitled project')}</h3>
+      <div class="meta">${esc(v.code||'—')} &middot; ${esc(v.date||'no date')} &middot; ${ps.length} parcel${ps.length===1?'':'s'} &middot; ${linked} linked</div></div>`;
+  }).join('');
+  h+='</div>';
+  return h;
+}
+function wireVisits(){
+  document.querySelectorAll('[data-visit]').forEach(el=>el.onclick=()=>go('visit',{id:el.dataset.visit}));
+}
+
+let mapInst=null, mapParcelLayer=null, mapFeatureLayer=null;
+function visitHTML(vid){
+  const v=visit(vid); if(!v) return '<div class="wrap"><p>Visit not found. <a href="#" onclick="go(\'visits\')">Back</a></p></div>';
+  const ps=parcelsOf(vid);
+  const rev=visitReview(vid);
+  let h=`<div class="wrap">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <div><button class="btn ghost sm" id="back">&larr; All visits</button>
+        <h2 style="display:inline-block;margin-left:10px">${esc(v.project||'Untitled project')}</h2></div>
+      <div class="mut">${esc(v.code||'')} &middot; ${esc(v.date||'')} &middot; ${esc(v.surveyors||'')}</div>
+    </div>
+    <div class="grid3">
+      <div>
+        <div class="sect">Recorded parcels (${ps.length})</div>
+        ${ps.map(p=>{
+          const issues=parcelQA(p,vid);
+          const nlinks=(rev.links[p.id]||[]).length;
+          return `<div class="list-item${armedParcelId===p.id?' on':''}" data-parcel="${p.id}">
+            <h3>${esc(p.label||'Unnamed parcel')} ${p.ukhab?`<span class="pill grey">${esc(p.ukhab)}</span>`:''}</h3>
+            <div class="meta">${esc(p.ukhabName||'no code')} &middot; ${LAYER_LABEL[layerTypeOf(p)]}</div>
+            <div class="meta">${nlinks?`<span class="pill ok">${nlinks} linked</span>`:'<span class="pill bad">unlinked</span>'}
+              ${issues.length?`<span class="pill warn">${issues.length} issue${issues.length===1?'':'s'}</span>`:'<span class="pill ok">ready</span>'}</div>
+          </div>`;
+        }).join('')||'<p class="mut">No parcels recorded for this visit yet.</p>'}
+      </div>
+      <div>
+        <div class="sect">Map ${armedParcelId?`&middot; linking to <strong>${esc((SURVEY.parcels.find(x=>x.id===armedParcelId)||{}).label||'')}</strong> - click a feature to toggle`:'&middot; select a parcel to link its geometry'}</div>
+        <div id="map"></div>
+      </div>
+      <div>
+        <div class="sect">Uploaded layer</div>
+        <div class="toolbar">
+          <input type="file" id="geojsonfile" accept=".geojson,.json" style="display:none">
+          <button class="btn sm" id="uploadbtn">Upload GeoJSON</button>
+          ${rev.features.length?`<button class="btn ghost sm" id="clearfeatures">Clear all (${rev.features.length})</button>`:''}
+        </div>
+        <div id="featurelist" style="max-height:220px;overflow:auto">
+          ${rev.features.map(f=>{
+            const linkedTo=Object.entries(rev.links).filter(([pid,ids])=>ids.includes(f._id)).map(([pid])=>{const pp=SURVEY.parcels.find(x=>x.id===pid);return pp?pp.label:'?';});
+            return `<div class="feat-row${linkedTo.length?' linked':''}" data-feat="${f._id}">
+              <span>${esc(f.geometry?f.geometry.type:'?')} ${f.properties&&f.properties.name?esc(f.properties.name):''}</span>
+              <span class="mut">${linkedTo.length?esc(linkedTo.join(', ')):'unlinked'}</span>
+            </div>`;
+          }).join('')||'<p class="mut">Upload a GeoJSON file exported from QGIS to begin linking.</p>'}
+        </div>
+        <div class="sect">Export</div>
+        <div class="toolbar">
+          ${['habitats','hedgerows','rivers','trees'].map(lt=>{
+            const n=ps.filter(p=>layerTypeOf(p)===lt && (rev.links[p.id]||[]).length).length;
+            return `<button class="btn ghost sm" data-export="${lt}" ${n?'':'disabled'}>${LAYER_LABEL[lt]} (${n})</button>`;
+          }).join('')}
+        </div>
+        <div class="mut" style="margin-top:6px">Exports the Baseline fields only - Proposed/Retention/Strategic Significance are left for the metric design stage.</div>
+      </div>
+    </div>
+  </div>`;
+  return h;
+}
+function wireVisit(vid){
+  document.getElementById('back').onclick=()=>{ armedParcelId=null; go('visits'); };
+  document.querySelectorAll('[data-parcel]').forEach(el=>el.onclick=()=>{
+    armedParcelId = armedParcelId===el.dataset.parcel ? null : el.dataset.parcel;
+    render();
+  });
+  document.querySelectorAll('[data-feat]').forEach(el=>el.onclick=()=>toggleLink(vid,el.dataset.feat));
+  document.getElementById('uploadbtn').onclick=()=>document.getElementById('geojsonfile').click();
+  document.getElementById('geojsonfile').onchange=e=>handleUpload(vid,e.target.files[0]);
+  const clr=document.getElementById('clearfeatures');
+  if(clr) clr.onclick=()=>{
+    if(!confirm('Remove all uploaded features and links for this visit?')) return;
+    REVIEW.visits[vid]={features:[],links:{}}; saveReview(); render();
+  };
+  document.querySelectorAll('[data-export]').forEach(el=>el.onclick=()=>exportLayer(vid,el.dataset.export));
+  initMap(vid);
+}
+async function handleUpload(vid,file){
+  if(!file) return;
+  try{
+    const text=await file.text();
+    const gj=JSON.parse(text);
+    const feats=(gj.type==='FeatureCollection'?gj.features:[gj]).map(f=>Object.assign({_id:uid('f')},f));
+    const rev=visitReview(vid);
+    rev.features=rev.features.concat(feats);
+    saveReview(); render();
+    toast(feats.length+' feature'+(feats.length===1?'':'s')+' added');
+  }catch(e){ toast('Could not read that file: '+e.message); }
+}
+function toggleLink(vid,featId){
+  if(!armedParcelId){ toast('Select a parcel on the left first'); return; }
+  const rev=visitReview(vid);
+  const cur=rev.links[armedParcelId]||[];
+  rev.links[armedParcelId] = cur.includes(featId) ? cur.filter(x=>x!==featId) : cur.concat([featId]);
+  saveReview(); render();
+}
+
+function initMap(vid){
+  const el=document.getElementById('map'); if(!el) return;
+  if(mapInst){ mapInst.remove(); mapInst=null; }
+  const ps=parcelsOf(vid).filter(p=>p.lat!=null);
+  const rev=visitReview(vid);
+  const center = ps.length ? [ps[0].lat,ps[0].lon] : [54.5,-3.5];
+  mapInst=L.map(el).setView(center, ps.length?15:6);
+  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    {maxZoom:21, attribution:'Imagery &copy; Esri'}).addTo(mapInst);
+  mapParcelLayer=L.layerGroup().addTo(mapInst);
+  ps.forEach(p=>{
+    const m=L.circleMarker([p.lat,p.lon],{radius:6,color:'#0F5C5C',weight:2,fillColor:'#0F5C5C',fillOpacity:0.7}).addTo(mapParcelLayer);
+    m.bindTooltip(p.label||'Parcel');
+    m.on('click',()=>{ armedParcelId = armedParcelId===p.id?null:p.id; render(); });
+    if(p.annotation&&p.annotation.points&&p.annotation.points.length){
+      const pts=p.annotation.points;
+      if(p.annotation.type==='poly'&&pts.length>=3) L.polygon(pts,{color:'#0F5C5C',weight:2,fillOpacity:0.15}).addTo(mapParcelLayer);
+      else if(pts.length>1) L.polyline(pts,{color:'#0F5C5C',weight:3}).addTo(mapParcelLayer);
+    }
+  });
+  mapFeatureLayer=L.geoJSON({type:'FeatureCollection',features:rev.features},{
+    style:f=>{
+      const linked=armedParcelId && (rev.links[armedParcelId]||[]).includes(f._id);
+      return {color:linked?'#F68A15':'#3388ff',weight:linked?4:2,fillOpacity:linked?0.35:0.15};
+    },
+    pointToLayer:(f,latlng)=>{
+      const linked=armedParcelId && (rev.links[armedParcelId]||[]).includes(f._id);
+      return L.circleMarker(latlng,{radius:6,color:linked?'#F68A15':'#3388ff',weight:2,fillOpacity:0.7});
+    },
+    onEachFeature:(f,layer)=>{ layer.on('click',()=>toggleLink(vid,f._id)); }
+  }).addTo(mapInst);
+  if(ps.length===0 && rev.features.length){
+    try{ mapInst.fitBounds(mapFeatureLayer.getBounds(),{padding:[20,20]}); }catch(e){}
+  }
+}
+
+/* ============================================================
+   Export - one GeoJSON per layer type, Baseline fields only,
+   field names matching the Statutory Biodiversity Metric QGIS
+   template's own layers exactly (paste target: each layer's
+   "...Master EDIT ME" layer, which is what the Baseline/Proposed
+   filtered views also read from).
+   ============================================================ */
+function admin(v,p){
+  return {'Site Name':v.project||'','Survey Date':v.date||'','Survey Details':v.code||'',
+    'Comment':p.notes||'','Mapped by':v.surveyors||'','Company':'Aerial Ecology Ltd'};
+}
+function conditionLabel(p){ const s=condScore(p); return s?(CONDITION_LABEL[s.band]||''):''; }
+function exportLayer(vid,layerType){
+  const v=visit(vid), rev=visitReview(vid);
+  const ps=parcelsOf(vid).filter(p=>layerTypeOf(p)===layerType && (rev.links[p.id]||[]).length);
+  const features=[];
+  ps.forEach(p=>{
+    const links=rev.links[p.id]||[];
+    links.forEach(fid=>{
+      const src=rev.features.find(f=>f._id===fid); if(!src||!src.geometry) return;
+      let props={};
+      if(layerType==='habitats') props={
+        'Parcel Ref':p.label||p.id,'Baseline Broad Habitat Type':p.broad||'','Baseline Habitat Type':p.ukhabName||'',
+        'Area':p.area||'','Baseline Condition':conditionLabel(p),'Baseline Distinctiveness':DIST_HABITAT[p.ukhabName]||'',
+        ...admin(v,p)};
+      else if(layerType==='hedgerows') props={
+        'Parcel Ref':p.label||p.id,'Baseline Hedge Type':p.bngType||p.ukhabName||'',
+        'Length':p.area||'','Baseline Condition':conditionLabel(p),'Baseline Distinctiveness':DIST_HEDGE[p.bngType]||'',
+        ...admin(v,p)};
+      else if(layerType==='rivers') props={
+        'Parcel Ref':p.label||p.id,'Baseline River Type':p.bngType||p.ukhabName||'',
+        'Length':p.area||'','Baseline Condition':conditionLabel(p),'Baseline Distinctiveness':DIST_RIVER[p.bngType]||'',
+        ...admin(v,p)};
+      else props={
+        'Tree Ref':p.label||p.id,'Baseline Tree Type':p.ukhabName||'','Count':1,
+        'Baseline Condition':conditionLabel(p),'Baseline Rural or Urban Tree':'',
+        ...admin(v,p)};
+      features.push({type:'Feature',geometry:src.geometry,properties:props});
+    });
+  });
+  const fc={type:'FeatureCollection',features};
+  const blob=new Blob([JSON.stringify(fc,null,2)],{type:'application/geo+json'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=(v.project||'export').replace(/[^a-z0-9]+/gi,'-')+'-'+layerType+'.geojson';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+  toast('Exported '+features.length+' feature'+(features.length===1?'':'s')+' for '+LAYER_LABEL[layerType]);
+}
+
+/* ---------- boot ---------- */
+fbEnsure();
+fbAuth.onAuthStateChanged(user=>{
+  if(user){ subscribeSurvey(); subscribeReview(); }
+  render();
+});
+render();
+</script>
+</body>
+</html>
