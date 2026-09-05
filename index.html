@@ -520,7 +520,21 @@ function admin(v,p){
     'Comment':p.notes||'','Mapped by':v.surveyors||'','Company':'Aerial Ecology Ltd'};
 }
 function conditionLabel(p){ const s=condScore(p); return s?(CONDITION_LABEL[s.band]||''):''; }
-function exportLayer(vid,layerType){
+/* Symbology sidecars - the REAL Statutory Metric QGIS template's own style files
+   (Layer Styling/<Habitats|Hedgerows|Rivers>/Baseline <Type>.qml), copied verbatim into
+   styles/ rather than embedded inline (400KB+ each - keeping them as static assets
+   fetched only on export keeps index.html itself lean). Deliberately the *baseline*-
+   specific style, not each layer's combined "Master" style - checked directly against
+   the template's own .qgs project and found that Hedgerows/Rivers' Master layer is
+   styled by PROPOSED type, not Baseline, so pasting our baseline-only export there
+   would render everything as a generic "Other" colour. QGIS auto-applies a same-named
+   .qml sidecar when a vector file is opened directly, which is what this is for -
+   pasting into Master still works for attributes, just without automatic colour there
+   for Hedgerows/Rivers until Proposed data exists. No sidecar for Individual Trees -
+   its style needs Category/Baseline Tree Size/Rural-or-Urban, none of which BotanicApp
+   captures yet; shipping a style that can't categorise anything would be misleading. */
+const LAYER_QML={habitats:'styles/habitats.qml',hedgerows:'styles/hedgerows.qml',rivers:'styles/rivers.qml'};
+async function exportLayer(vid,layerType){
   const v=visit(vid), rev=visitReview(vid);
   const ps=parcelsOf(vid).filter(p=>layerTypeOf(p)===layerType && (rev.links[p.id]||[]).length);
   const features=[];
@@ -549,13 +563,24 @@ function exportLayer(vid,layerType){
     });
   });
   const fc={type:'FeatureCollection',features};
-  const blob=new Blob([JSON.stringify(fc,null,2)],{type:'application/geo+json'});
-  const a=document.createElement('a');
-  a.href=URL.createObjectURL(blob);
-  a.download=(v.project||'export').replace(/[^a-z0-9]+/gi,'-')+'-'+layerType+'.geojson';
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(()=>URL.revokeObjectURL(a.href),4000);
-  toast('Exported '+features.length+' feature'+(features.length===1?'':'s')+' for '+LAYER_LABEL[layerType]);
+  const base=(v.project||'export').replace(/[^a-z0-9]+/gi,'-')+'-'+layerType;
+  const dl=(name,content,type)=>{
+    const blob=new Blob([content],{type});
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob); a.download=name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+  };
+  dl(base+'.geojson', JSON.stringify(fc,null,2), 'application/geo+json');
+  let styled=false;
+  if(LAYER_QML[layerType]){
+    try{
+      const qml=await fetch(LAYER_QML[layerType]).then(r=>r.ok?r.text():null);
+      if(qml){ dl(base+'.qml', qml, 'application/xml'); styled=true; }
+    }catch(e){ console.warn('style sidecar fetch failed',e); }
+  }
+  toast('Exported '+features.length+' feature'+(features.length===1?'':'s')+' for '+LAYER_LABEL[layerType]
+    +(styled?' with symbology':(layerType==='trees'?' (no symbology yet - needs tree size/rural-urban data)':'')));
 }
 
 /* ---------- boot ---------- */
