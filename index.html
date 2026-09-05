@@ -537,10 +537,10 @@ function conditionLabel(p){ const s=condScore(p); return s?(CONDITION_LABEL[s.ba
    would render everything as a generic "Other" colour. QGIS auto-applies a same-named
    .qml sidecar when a vector file is opened directly, which is what this is for -
    pasting into Master still works for attributes, just without automatic colour there
-   for Hedgerows/Rivers until Proposed data exists. No sidecar for Individual Trees -
-   its style needs Category/Baseline Tree Size/Rural-or-Urban, none of which BotanicApp
-   captures yet; shipping a style that can't categorise anything would be misleading. */
-const LAYER_QML={habitats:'styles/habitats.qml',hedgerows:'styles/hedgerows.qml',rivers:'styles/rivers.qml'};
+   for Hedgerows/Rivers until Proposed data exists. Individual Trees now ships a sidecar
+   too (styles/trees.qml, rule-based on Category/Baseline Tree Size/Rural-or-Urban) now
+   that BotanicApp records all three on its own standalone Individual Tree parcel type. */
+const LAYER_QML={habitats:'styles/habitats.qml',hedgerows:'styles/hedgerows.qml',rivers:'styles/rivers.qml',trees:'styles/trees.qml'};
 /* UKHab-style export (Clara, 2026-09-05): "another one exporting in UKHabs style with a
    Primary Habitat field and secondary codes field... include any notes" - so far only built
    for Habitats (areas), matching the one style file supplied (ukhab-habitats.qml, categorised
@@ -575,8 +575,9 @@ async function exportLayer(vid,layerType,habMode){
         'Length':p.area||'','Baseline Condition':conditionLabel(p),'Baseline Distinctiveness':DIST_RIVER[p.bngType]||'',
         ...admin(v,p)};
       else props={
-        'Tree Ref':p.label||p.id,'Baseline Tree Type':p.ukhabName||'','Count':1,
-        'Baseline Condition':conditionLabel(p),'Baseline Rural or Urban Tree':'',
+        'Tree Ref':p.label||p.id,'Category':'Existing','Baseline Tree Type':p.treeNativity||'',
+        'Baseline Tree Size':p.treeSize||'','Baseline Rural or Urban Tree':p.treeRuralUrban||'','Count':1,
+        'Baseline Condition':conditionLabel(p),
         ...admin(v,p)};
       features.push({type:'Feature',geometry:src.geometry,properties:props});
     });
@@ -600,7 +601,7 @@ async function exportLayer(vid,layerType,habMode){
     }catch(e){ console.warn('style sidecar fetch failed',e); }
   }
   toast('Exported '+features.length+' feature'+(features.length===1?'':'s')+' for '+LAYER_LABEL[layerType]
-    +(styled?' with symbology':(layerType==='trees'?' (no symbology yet - needs tree size/rural-urban data)':'')));
+    +(styled?' with symbology':''));
 }
 
 /* ---------- boot ---------- */
