@@ -115,6 +115,7 @@ let REVIEW={visits:{}};  // this app's own data: { [visitId]: { features:[], lin
 let surveyUnsub=null, reviewUnsub=null;
 let nav={v:'visits'};
 let armedParcelId=null; // when set, clicking an uploaded feature toggles its link to this parcel
+let habitatsExportMode='bng'; // 'bng' | 'ukhab' - only the Habitats (areas) export offers both so far
 
 const uid=p=>p+Math.random().toString(36).slice(2,9);
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -423,13 +424,18 @@ function visitHTML(vid){
           }).join('')||'<p class="mut">Upload a GeoJSON file exported from QGIS to begin linking.</p>'}
         </div>
         <div class="sect">Export</div>
+        <div class="mut" style="margin-bottom:6px">Habitats (areas) format:</div>
+        <div class="toolbar" style="margin-bottom:4px">
+          <button class="btn ${habitatsExportMode==='bng'?'':'ghost'} sm" data-habmode="bng">BNG baseline</button>
+          <button class="btn ${habitatsExportMode==='ukhab'?'':'ghost'} sm" data-habmode="ukhab">UKHab</button>
+        </div>
         <div class="toolbar">
           ${['habitats','hedgerows','rivers','trees'].map(lt=>{
             const n=ps.filter(p=>layerTypeOf(p)===lt && (rev.links[p.id]||[]).length).length;
             return `<button class="btn ghost sm" data-export="${lt}" ${n?'':'disabled'}>${LAYER_LABEL[lt]} (${n})</button>`;
           }).join('')}
         </div>
-        <div class="mut" style="margin-top:6px">Exports the Baseline fields only - Proposed/Retention/Strategic Significance are left for the metric design stage.</div>
+        <div class="mut" style="margin-top:6px">Exports the Baseline fields only - Proposed/Retention/Strategic Significance are left for the metric design stage. Hedgerows/Rivers/Individual Trees always export BNG-style for now - a UKHab format (and matching symbology) for those isn't built yet.</div>
       </div>
     </div>
   </div>`;
@@ -449,7 +455,8 @@ function wireVisit(vid){
     if(!confirm('Remove all uploaded features and links for this visit?')) return;
     REVIEW.visits[vid]={features:[],links:{}}; saveReview(); render();
   };
-  document.querySelectorAll('[data-export]').forEach(el=>el.onclick=()=>exportLayer(vid,el.dataset.export));
+  document.querySelectorAll('[data-export]').forEach(el=>el.onclick=()=>exportLayer(vid,el.dataset.export,habitatsExportMode));
+  document.querySelectorAll('[data-habmode]').forEach(el=>el.onclick=()=>{ habitatsExportMode=el.dataset.habmode; render(); });
   initMap(vid);
 }
 async function handleUpload(vid,file){
@@ -534,16 +541,28 @@ function conditionLabel(p){ const s=condScore(p); return s?(CONDITION_LABEL[s.ba
    its style needs Category/Baseline Tree Size/Rural-or-Urban, none of which BotanicApp
    captures yet; shipping a style that can't categorise anything would be misleading. */
 const LAYER_QML={habitats:'styles/habitats.qml',hedgerows:'styles/hedgerows.qml',rivers:'styles/rivers.qml'};
-async function exportLayer(vid,layerType){
+/* UKHab-style export (Clara, 2026-09-05): "another one exporting in UKHabs style with a
+   Primary Habitat field and secondary codes field... include any notes" - so far only built
+   for Habitats (areas), matching the one style file supplied (ukhab-habitats.qml, categorised
+   on the exact UKHab code, e.g. "g1a" - more robust than the BNG export's name-string
+   matching). Hedgerows/Rivers/Individual Trees don't get a UKHab mode yet - Clara: "we may
+   need to keep hedgerows with same symbology as BNG for now (i will work on a proper UKHab
+   matching one for those)" - no UKHab style exists for those layers to ship, so offering the
+   toggle for them would just be a silent no-op or a broken style. */
+async function exportLayer(vid,layerType,habMode){
   const v=visit(vid), rev=visitReview(vid);
   const ps=parcelsOf(vid).filter(p=>layerTypeOf(p)===layerType && (rev.links[p.id]||[]).length);
+  const ukhab = layerType==='habitats' && habMode==='ukhab';
   const features=[];
   ps.forEach(p=>{
     const links=rev.links[p.id]||[];
     links.forEach(fid=>{
       const src=rev.features.find(f=>f._id===fid); if(!src||!src.geometry) return;
       let props={};
-      if(layerType==='habitats') props={
+      if(ukhab) props={
+        'Parcel Ref':p.label||p.id,'UKHabs':p.ukhab||'','Secondary Codes':(p.sec||[]).join(', '),
+        'Area':p.area||'','Notes':p.notes||'',...admin(v,p)};
+      else if(layerType==='habitats') props={
         'Parcel Ref':p.label||p.id,'Baseline Broad Habitat Type':p.broad||'','Baseline Habitat Type':p.ukhabName||'',
         'Area':p.area||'','Baseline Condition':conditionLabel(p),'Baseline Distinctiveness':DIST_HABITAT[p.ukhabName]||'',
         ...admin(v,p)};
@@ -563,7 +582,7 @@ async function exportLayer(vid,layerType){
     });
   });
   const fc={type:'FeatureCollection',features};
-  const base=(v.project||'export').replace(/[^a-z0-9]+/gi,'-')+'-'+layerType;
+  const base=(v.project||'export').replace(/[^a-z0-9]+/gi,'-')+'-'+layerType+(ukhab?'-ukhab':'');
   const dl=(name,content,type)=>{
     const blob=new Blob([content],{type});
     const a=document.createElement('a');
@@ -573,9 +592,10 @@ async function exportLayer(vid,layerType){
   };
   dl(base+'.geojson', JSON.stringify(fc,null,2), 'application/geo+json');
   let styled=false;
-  if(LAYER_QML[layerType]){
+  const qmlPath = ukhab ? 'styles/ukhab-habitats.qml' : LAYER_QML[layerType];
+  if(qmlPath){
     try{
-      const qml=await fetch(LAYER_QML[layerType]).then(r=>r.ok?r.text():null);
+      const qml=await fetch(qmlPath).then(r=>r.ok?r.text():null);
       if(qml){ dl(base+'.qml', qml, 'application/xml'); styled=true; }
     }catch(e){ console.warn('style sidecar fetch failed',e); }
   }
