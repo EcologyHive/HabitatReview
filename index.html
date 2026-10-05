@@ -73,14 +73,23 @@ th{color:var(--ink2);font-weight:700;font-size:11px;text-transform:uppercase}
 <div class="toast" id="toast"></div>
 <script>
 /* ============================================================
-   Firebase - reads the same habitats/<org>/db blob BotanicApp
+   Firebase - reads the same habitats/<org> records BotanicApp
    writes (read-only from here), and keeps this app's own working
    state (uploaded features, parcel<->feature links) in a sibling
    path, habitats/<org>/review, so the two apps never write the
    same keys and can't clobber each other. Same project/org as
    BotanicApp - one shared sign-in, not a second account system.
    ============================================================ */
-const HSYNC_ORG='aerial-ecology';
+// The organisation comes from the signed-in account (sync/userOrgs/{uid}), the same way Habitats,
+// Metrics and the Hub resolve it - never hard-wired, so a second company sees only its own data.
+let HSYNC_ORG=null;
+async function fbResolveOrg(uid){
+  const snap=await fbDb.ref('sync/userOrgs/'+uid).once('value');
+  const orgs=Object.keys(snap.val()||{});
+  if(!orgs.length) throw new Error('That sign-in worked, but this account is not a member of any organisation.');
+  if(orgs.length>1) console.warn('This account belongs to several organisations - using the first:',orgs);
+  return orgs[0];
+}
 const HSYNC_CONFIG={
   apiKey:'AIzaSyA3KtbST1u6xfReD5Jqmlb7dxVRQENuh1s',
   authDomain:'ae-batassist.firebaseapp.com',
@@ -100,8 +109,8 @@ function fbEnsure(){
 async function fbSignIn(email,password){
   fbEnsure();
   const cred=await fbAuth.signInWithEmailAndPassword(email.trim(),password);
-  const memberSnap=await fbDb.ref('sync/orgMembers/'+HSYNC_ORG+'/'+cred.user.uid).once('value');
-  if(!memberSnap.val()){ await fbAuth.signOut(); throw new Error('That sign-in worked, but this account is not a member of the org this data belongs to.'); }
+  try{ HSYNC_ORG=await fbResolveOrg(cred.user.uid); }
+  catch(e){ await fbAuth.signOut(); throw e; }
   return cred.user;
 }
 function dbRoot(){ return 'habitats/'+HSYNC_ORG; }
@@ -125,20 +134,42 @@ const visit=id=>SURVEY.visits.find(v=>v.id===id);
 const parcelsOf=vid=>SURVEY.parcels.filter(p=>p.visitId===vid);
 function visitReview(vid){ REVIEW.visits[vid]=REVIEW.visits[vid]||{features:[],links:{}}; return REVIEW.visits[vid]; }
 
+// Habitats has stored each collection as its own id-keyed map since 18 Sep 2026, and survey
+// sessions under visitSessions since 5 Oct. The old whole-blob `db` copy stopped updating on
+// 18 Sep, so it is only used for an organisation that has never synced in the newer shape.
+const SURVEY_COLLS=['visits','parcels','quadrats','targets'];
+const mapToList=m=>Object.values(m||{}).filter(x=>x&&x.id);
 function subscribeSurvey(){
-  if(surveyUnsub) return;
+  if(surveyUnsub||!HSYNC_ORG) return;
   fbEnsure();
-  const ref=fbDb.ref(dbRoot()+'/db');
-  const handler=ref.on('value',snap=>{
+  const live={}, offs=[];
+  const hasCurrent=()=>SURVEY_COLLS.some(c=>live[c]);
+  const apply=()=>{
+    if(!hasCurrent()) return;
+    const next={visits:[],parcels:[],quadrats:[],targets:[]};
+    SURVEY_COLLS.forEach(c=>{ next[c]=mapToList(live[c]); });
+    const sess=live.visitSessions||{};
+    next.visits.forEach(v=>{ if(sess[v.id]) v.sessions=mapToList(sess[v.id]); });
+    SURVEY=next;
+    render();
+  };
+  [...SURVEY_COLLS,'visitSessions'].forEach(c=>{
+    const ref=fbDb.ref(dbRoot()+'/'+c);
+    const h=ref.on('value',snap=>{ live[c]=snap.val(); apply(); });
+    offs.push(()=>ref.off('value',h));
+  });
+  const oldRef=fbDb.ref(dbRoot()+'/db');
+  const oldH=oldRef.on('value',snap=>{
     const val=snap.val();
-    if(!val) return;
+    if(!val||hasCurrent()) return;
     SURVEY=Object.assign({visits:[],parcels:[],quadrats:[],targets:[]},val);
     render();
   });
-  surveyUnsub=()=>ref.off('value',handler);
+  offs.push(()=>oldRef.off('value',oldH));
+  surveyUnsub=()=>offs.forEach(f=>f());
 }
 function subscribeReview(){
-  if(reviewUnsub) return;
+  if(reviewUnsub||!HSYNC_ORG) return;
   fbEnsure();
   const ref=fbDb.ref(reviewRoot());
   const handler=ref.on('value',snap=>{
@@ -152,7 +183,9 @@ function saveReview(){
   clearTimeout(reviewPushTimer);
   reviewPushTimer=setTimeout(()=>{
     fbEnsure();
-    fbDb.ref(reviewRoot()).set(REVIEW).catch(e=>console.error('review save failed',e));
+    // Per-visit update, not a set of the whole tree: saving one visit's links can no longer wipe
+    // links another person saved on a different visit in the meantime.
+    fbDb.ref(reviewRoot()+'/visits').update(JSON.parse(JSON.stringify(REVIEW.visits))).catch(e=>console.error('review save failed',e));
   },500);
 }
 
@@ -606,8 +639,17 @@ async function exportLayer(vid,layerType,habMode){
 
 /* ---------- boot ---------- */
 fbEnsure();
-fbAuth.onAuthStateChanged(user=>{
-  if(user){ subscribeSurvey(); subscribeReview(); }
+fbAuth.onAuthStateChanged(async user=>{
+  if(user){
+    try{ HSYNC_ORG=await fbResolveOrg(user.uid); }
+    catch(e){ toast(e.message); render(); return; }
+    subscribeSurvey(); subscribeReview();
+  }else{
+    // Signed out: stop listening and forget the previous account's organisation and data.
+    if(surveyUnsub){ surveyUnsub(); surveyUnsub=null; }
+    if(reviewUnsub){ reviewUnsub(); reviewUnsub=null; }
+    HSYNC_ORG=null; SURVEY={visits:[],parcels:[],quadrats:[],targets:[]}; REVIEW={visits:{}};
+  }
   render();
 });
 render();
