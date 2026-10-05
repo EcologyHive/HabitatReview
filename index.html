@@ -86,6 +86,9 @@ let HSYNC_ORG=null;
 async function fbResolveOrg(uid){
   const snap=await fbDb.ref('sync/userOrgs/'+uid).once('value');
   const orgs=Object.keys(snap.val()||{});
+  // An account added before sync/userOrgs existed may only be listed under sync/orgMembers/aerial-ecology
+  // (what Linker checked before 2026-10-05) - keep it working.
+  if(!orgs.length){ try{ if((await fbDb.ref('sync/orgMembers/aerial-ecology/'+uid).once('value')).exists()) orgs.push('aerial-ecology'); }catch(e){ /* refused: not a member */ } }
   if(!orgs.length) throw new Error('That sign-in worked, but this account is not a member of any organisation.');
   if(orgs.length>1) console.warn('This account belongs to several organisations - using the first:',orgs);
   return orgs[0];
