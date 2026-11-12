@@ -12,6 +12,10 @@
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js" crossorigin="anonymous"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-database-compat.js" crossorigin="anonymous"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js" crossorigin="anonymous"></script>
+<!-- EcologyHive Core -- pinned version, never "latest". geometry + crs: exports default to British National Grid (EPSG:27700) -->
+<script src="https://ecologyhive.github.io/ecologyhive-core/v0.1.0/geometry.js" crossorigin="anonymous"></script>
+<script src="https://ecologyhive.github.io/ecologyhive-core/v0.1.0/prefs.js" crossorigin="anonymous"></script>
+<script src="https://ecologyhive.github.io/ecologyhive-core/v0.1.0/crs.js" crossorigin="anonymous"></script>
 <style>
 :root{
   --teal:#0F5C5C; --teal2:#176F6E; --teal-lite:#e3efee;
@@ -127,6 +131,13 @@ let REVIEW={visits:{}};  // this app's own data: { [visitId]: { features:[], lin
 let surveyUnsub=null, reviewUnsub=null;
 let nav={v:'visits'};
 let armedParcelId=null; // when set, clicking an uploaded feature toggles its link to this parcel
+/* Export coordinates (EcologyHive building rule, Clara 2026-11-12): exports default to British National
+   Grid (EPSG:27700) - the grid the Defra metric QGIS template works in. The map and stored features stay
+   WGS84. The person's own choice is shared by every EcologyHive app and never remembered for guests.
+   If Core's crs.js didn't load, exports stay WGS84 exactly as before. (Not to be confused with
+   habitatsExportMode's 'bng' below, which is the Biodiversity Net Gain field layout.) */
+const LCrs=(window.EHCore&&EHCore.Crs)?EHCore.Crs.createChooser():null;
+function exportCrs(){ return LCrs?LCrs.current():'EPSG:4326'; }
 let habitatsExportMode='bng'; // 'bng' | 'ukhab' - only the Habitats (areas) export offers both so far
 
 const uid=p=>p+Math.random().toString(36).slice(2,9);
@@ -471,6 +482,9 @@ function visitHTML(vid){
             return `<button class="btn ghost sm" data-export="${lt}" ${n?'':'disabled'}>${LAYER_LABEL[lt]} (${n})</button>`;
           }).join('')}
         </div>
+        ${LCrs?`<div style="margin-top:8px"><label class="mut" for="exportcrs">Coordinates in exports</label>
+          <select id="exportcrs" style="display:block;margin-top:4px;max-width:320px">${EHCore.Crs.LIST.map(c=>`<option value="${c.id}"${c.id===exportCrs()?' selected':''}>${c.label}</option>`).join('')}</select>
+          <div class="mut" style="margin-top:4px">${LCrs.isGuest()?'Not remembered for guests.':'Saved for you in every EcologyHive app.'}</div></div>`:''}
         <div class="mut" style="margin-top:6px">Exports the Baseline fields only - Proposed/Retention/Strategic Significance are left for the metric design stage. Hedgerows/Rivers/Individual Trees always export BNG-style for now - a UKHab format (and matching symbology) for those isn't built yet.</div>
       </div>
     </div>
@@ -492,6 +506,7 @@ function wireVisit(vid){
     REVIEW.visits[vid]={features:[],links:{}}; saveReview(); render();
   };
   document.querySelectorAll('[data-export]').forEach(el=>el.onclick=()=>exportLayer(vid,el.dataset.export,habitatsExportMode));
+  const crsSel=document.getElementById('exportcrs'); if(crsSel&&LCrs) crsSel.onchange=()=>LCrs.set(crsSel.value);
   document.querySelectorAll('[data-habmode]').forEach(el=>el.onclick=()=>{ habitatsExportMode=el.dataset.habmode; render(); });
   initMap(vid);
 }
@@ -499,7 +514,14 @@ async function handleUpload(vid,file){
   if(!file) return;
   try{
     const text=await file.text();
-    const gj=JSON.parse(text);
+    let gj=JSON.parse(text);
+    // QGIS layers are often saved in British National Grid. The map needs WGS84, so a BNG file is
+    // converted here; a system Core can't convert is refused rather than drawn in the wrong place.
+    if(window.EHCore&&EHCore.Crs){
+      const conv=EHCore.Crs.toWgs84GeoJson(gj);
+      if(!conv.ok){ toast('That file is in '+conv.from+', which can\'t be read yet. Save it from QGIS as WGS84 (EPSG:4326) or British National Grid (EPSG:27700).'); return; }
+      gj=conv.geojson;
+    }
     const feats=(gj.type==='FeatureCollection'?gj.features:[gj]).map(f=>Object.assign({_id:uid('f')},f));
     const rev=visitReview(vid);
     rev.features=rev.features.concat(feats);
@@ -618,7 +640,7 @@ async function exportLayer(vid,layerType,habMode){
       features.push({type:'Feature',geometry:src.geometry,properties:props});
     });
   });
-  const fc={type:'FeatureCollection',features};
+  const fc=LCrs?EHCore.Crs.toExportGeoJson({type:'FeatureCollection',features},exportCrs()):{type:'FeatureCollection',features};
   const base=(v.project||'export').replace(/[^a-z0-9]+/gi,'-')+'-'+layerType+(ukhab?'-ukhab':'');
   const dl=(name,content,type)=>{
     const blob=new Blob([content],{type});
@@ -643,6 +665,7 @@ async function exportLayer(vid,layerType,habMode){
 /* ---------- boot ---------- */
 fbEnsure();
 fbAuth.onAuthStateChanged(async user=>{
+  if(LCrs){ try{ LCrs.attach({db:fbDb||firebase.database(),user}); }catch(e){ console.warn('export coordinates setting not attached:',e); } }
   if(user){
     try{ HSYNC_ORG=await fbResolveOrg(user.uid); }
     catch(e){ toast(e.message); render(); return; }
