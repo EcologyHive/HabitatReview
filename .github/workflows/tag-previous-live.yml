@@ -1,0 +1,41 @@
+name: Tag previous live version
+
+# Every time main changes (a push or a merged PR), tag the commit that was
+# live just BEFORE the change as previous-live/YYYY-MM-DD-HHMM, so there is
+# always a named point to go back to. Tags are only ever added, never moved
+# or deleted.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const before = context.payload.before;
+            if (!before || /^0+$/.test(before)) {
+              core.info('No previous version of main to tag.');
+              return;
+            }
+            const now = new Date().toISOString();           // 2026-11-21T14:09:32.000Z
+            const stamp = now.slice(0, 10) + '-' + now.slice(11, 16).replace(':', '');
+            let name = `previous-live/${stamp}`;
+            for (let i = 2; ; i++) {
+              try {
+                await github.rest.git.createRef({
+                  owner: context.repo.owner, repo: context.repo.repo,
+                  ref: `refs/tags/${name}`, sha: before,
+                });
+                break;
+              } catch (e) {
+                if (e.status !== 422 || i > 20) throw e;     // 422 = tag name already used this minute
+                name = `previous-live/${stamp}-${i}`;
+              }
+            }
+            core.notice(`Tagged previous live version ${before.slice(0, 7)} as ${name}`);
